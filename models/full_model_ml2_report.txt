@@ -1,0 +1,21 @@
+Full Model ML2 (GBDT+Iso)
+Variant: full_model_ml2
+Window: 2024-03-28 .. 2025-08-12
+Train N: 3989 | Val N: 746
+
+Validation metrics:
+accuracy: 0.554
+balanced_accuracy: 0.524
+roc_auc: 0.572
+log_loss: 0.674
+brier: 0.242
+precision: 0.550
+recall: 0.927
+f1: 0.690
+
+Coverage/Accuracy by confidence threshold:
+ threshold  coverage  pick_acc   n
+      0.55  0.392761  0.614334 746
+      0.60  0.117962  0.715909 746
+      0.65  0.061662  0.804348 746
+      0.70  0.061662  0.804348 746

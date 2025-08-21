@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Admin · Sports Predict{% endblock %}
+{% block content %}
+<section>
+  <h2>Admin</h2>
+  <p>Today ({{ today }}): {{ today_preds }} saved predictions.</p>
+  <p class="muted">You can add admin actions here later (e.g., re-run predictions, backfill, etc.).</p>
+</section>
+{% endblock %}

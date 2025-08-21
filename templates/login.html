@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Login · Sports Predict{% endblock %}
+{% block content %}
+<section>
+  <h2>Login</h2>
+  <form method="post">
+    <label>Username
+      <input type="text" name="username" required autofocus>
+    </label>
+    <label>Password
+      <input type="password" name="password" required>
+    </label>
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="muted">Default admin: <code>mike</code> / <code>moore</code></p>
+</section>
+{% endblock %}

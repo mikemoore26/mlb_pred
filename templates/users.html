@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Users · Sports Predict{% endblock %}
+{% block content %}
+<section>
+  <h2>Users</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Admin?</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in rows %}
+        <tr>
+          <td>{{ u.username }}</td>
+          <td>{{ 'yes' if u.is_admin else 'no' }}</td>
+          <td>{{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

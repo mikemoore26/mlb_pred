@@ -1,0 +1,21 @@
+Full Model ML1 (LR+Iso)
+Variant: full_model_ml1
+Window: 2024-03-28 .. 2025-08-12
+Train N: 3989 | Val N: 746
+
+Validation metrics:
+accuracy: 0.584
+balanced_accuracy: 0.578
+roc_auc: 0.610
+log_loss: 0.663
+brier: 0.237
+precision: 0.600
+recall: 0.672
+f1: 0.634
+
+Coverage/Accuracy by confidence threshold:
+ threshold  coverage  pick_acc   n
+      0.55  0.828418  0.597087 746
+      0.60  0.152815  0.745614 746
+      0.65  0.152815  0.745614 746
+      0.70  0.093834  0.800000 746

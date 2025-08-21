@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Home · Sports Predict{% endblock %}
+{% block content %}
+<section>
+  <h2>Welcome</h2>
+  <p>Use the navigation to view predictions, manage users, or admin info.</p>
+  <ul>
+    <li><a href="{{ url_for('main.predictions') }}">Today’s Predictions</a></li>
+    {% if current_user.is_admin %}
+      <li><a href="{{ url_for('main.admin') }}">Admin dashboard</a></li>
+      <li><a href="{{ url_for('main.users') }}">Users</a></li>
+    {% endif %}
+  </ul>
+</section>
+{% endblock %}

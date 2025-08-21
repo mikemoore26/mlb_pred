@@ -1,0 +1,16 @@
+{
+  "aliases": {
+    "Los Angeles Dodgers": "Dodger Stadium",
+    "New York Yankees": "Yankee Stadium",
+    "San Francisco Giants": "Oracle Park",
+    "Oakland Athletics": "Oakland Coliseum",
+    "Tampa Bay Rays": "Tropicana Field"
+  },
+  "park_factor": {
+    "Dodger Stadium": 0.99,
+    "Yankee Stadium": 1.05,
+    "Oracle Park": 0.97,
+    "Oakland Coliseum": 0.98,
+    "Tropicana Field": 1.00
+  }
+}
