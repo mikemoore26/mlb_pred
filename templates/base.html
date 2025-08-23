@@ -15,15 +15,15 @@
       <nav class="flex gap-4">
         <a class="hover:underline" href="{{ url_for('main.index') }}">Home</a>
         <a class="hover:underline" href="{{ url_for('main.predictions') }}">Predictions</a>
-        <a class="hover:underline" href="{{ url_for('settings') }}">Settings</a>
+        <a class="hover:underline" href="{{ url_for('main.settings') }}">Settings</a>
         <a class="hover:underline" href="{{ url_for('main.contact') }}">Contact</a>
         {% if current_user.is_authenticated and current_user.is_admin %}
           <a class="hover:underline text-amber-300" href="{{ url_for('main.admin') }}">Admin</a>
         {% endif %}
         {% if current_user.is_authenticated %}
-          <a class="hover:underline" href="{{ url_for('logout') }}">Logout</a>
+          <a class="hover:underline" href="{{ url_for('auth.logout') }}">Logout</a>
         {% else %}
-          <a class="hover:underline" href="{{ url_for('login') }}">Login</a>
+          <a class="hover:underline" href="{{ url_for('auth.login') }}">Login</a>
         {% endif %}
       </nav>
     </div>

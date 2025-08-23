@@ -2,30 +2,33 @@
 {% block content %}
 <h1 class="text-xl font-semibold mb-4">Today’s Predictions</h1>
 
-{% if preds is none or preds.empty %}
-  <p>No games to predict today.</p>
+{% if not preds or preds|length == 0 %}
+  <p>No scheduled games or predictions for today.</p>
 {% else %}
   <div class="overflow-x-auto">
-    <table class="w-full text-left">
-      <thead>
-        <tr class="text-slate-600 text-sm border-b">
-          <th class="py-2 pr-4">Start (UTC)</th>
-          <th class="py-2 pr-4">Home</th>
-          <th class="py-2 pr-4">Away</th>
-          <th class="py-2 pr-4">p(Home)</th>
-          <th class="py-2 pr-4">Pick</th>
-          <th class="py-2 pr-4">Pick Prob</th>
+    <table class="min-w-full text-sm border border-slate-200 rounded">
+      <thead class="bg-slate-100">
+        <tr>
+          <th class="text-left p-2 border-b">Start (UTC)</th>
+          <th class="text-left p-2 border-b">Home</th>
+          <th class="text-left p-2 border-b">Away</th>
+          <th class="text-left p-2 border-b">Pick</th>
+          <th class="text-left p-2 border-b">Prob (%)</th>
         </tr>
       </thead>
-      <tbody class="text-sm">
-        {% for _, r in preds.iterrows() %}
-        <tr class="border-b hover:bg-slate-100">
-          <td class="py-2 pr-4">{{ r.start_time if 'start_time' in preds.columns else '' }}</td>
-          <td class="py-2 pr-4">{{ r.home_team }}</td>
-          <td class="py-2 pr-4">{{ r.away_team }}</td>
-          <td class="py-2 pr-4">{{ '%.3f'|format(r.proba) }}</td>
-          <td class="py-2 pr-4">{{ r.pick }}</td>
-          <td class="py-2 pr-4">{{ '%.3f'|format(r.pick_prob) }}</td>
+      <tbody>
+        {% for g in preds %}
+        <tr class="hover:bg-slate-50">
+          <td class="p-2 border-b">{{ g.get('start_time','') }}</td>
+          <td class="p-2 border-b">{{ g.get('home_team','') }}</td>
+          <td class="p-2 border-b">{{ g.get('away_team','') }}</td>
+          <td class="p-2 border-b font-semibold">
+            {{ g.get('pick_team','') }}
+          </td>
+          <td class="p-2 border-b">
+            {% set pp = g.get('pick_prob', 0) %}
+            {{ (pp * 100) | round(1) }}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

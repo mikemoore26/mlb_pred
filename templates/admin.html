@@ -55,5 +55,8 @@
       {% endfor %}
     </tbody>
   </table>
+  <div>
+    <p>The two models for predicting MLB match winners, Full Model ML1 (utilizing Logistic Regression with Isolation) and Full Model ML2 (employing Gradient Boosted Decision Trees with Isolation), share identical training windows from March 28, 2024, to August 12, 2025, and dataset sizes with 3,989 training samples and 746 validation samples, allowing for a direct apples-to-apples comparison. However, ML1 outperforms ML2 in key validation metrics, achieving an accuracy of 0.584 and balanced accuracy of 0.578 compared to ML2's lower scores of 0.554 and 0.524, respectively, suggesting that the simpler logistic regression approach may better capture the underlying patterns in the data without overfitting, while the more complex gradient boosting method could be suffering from higher variance or less effective handling of class imbalances in this context. Based on these results, I recommend using ML1 for deployment, as its superior accuracy and balanced accuracy indicate greater reliability in predicting winners across potentially imbalanced home/away or favorite/underdog scenarios typical in MLB games. To improve both models, consider incorporating additional features like player-specific stats (e.g., recent batting averages or pitching ERAs), weather conditions, or venue effects through feature engineering; perform hyperparameter tuning via grid search or Bayesian optimization to optimize model parameters; collect more recent data to expand the training set and reduce potential temporal biases; or experiment with ensemble techniques, such as stacking ML1 and ML2 together, to leverage their strengths and further boost overall performance.</p>
+  </div>
 </div>
 {% endblock %}
