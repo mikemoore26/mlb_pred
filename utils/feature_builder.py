@@ -4,7 +4,7 @@ from typing import Any, Optional, List, Dict
 import pandas as pd
 from dateutil import parser
 
-# Pull cached/raw inputs from the fetch layer
+# Pull cached/raw inputs from the fetch layer (provides cc_* cached helpers)
 from utils import data_fetchers as DF
 
 META_COLS = ["game_date", "home_team", "away_team", "home_win"]
@@ -25,12 +25,14 @@ def _i(x: Any, d: int = 0) -> int:
 
 
 # -------- single-game feature builder --------
-def build_features_for_game(g: dict,
-                            include_odds: bool = False,
-                            include_weather: bool = True) -> Dict[str, Any]:
+def build_features_for_game(
+    g: dict,
+    include_odds: bool = False,
+    include_weather: bool = True
+) -> Dict[str, Any]:
     """
     Convert one raw game dict (from DF.cc_schedule) into a flat feature row.
-    Uses only cached fetchers from utils.data_fetchers (DF).
+    Uses only cached fetchers from utils.data_fetchers (DF.cc_*).
     """
     status = ((g.get("status") or {}).get("detailedState") or "").lower()
 
@@ -48,8 +50,7 @@ def build_features_for_game(g: dict,
     else:
         home_win = None
 
-    # Pre-cached dictionaries (already warmed in calling range)
-    # (We still re-look them up to keep build isolated when used standalone.)
+    # Pre-cached dictionaries (look them up here for standalone usage too)
     wp_season = DF.cc_wpct_season()
     wp_30     = DF.cc_wpct_last30()
     bp14      = DF.cc_bullpen_era14()
@@ -65,7 +66,6 @@ def build_features_for_game(g: dict,
     s_a = DF.cc_pitcher_season(aid)
 
     # last-30 ERA (if your sources implements it; default None→0.0 diff)
-    # we call sources via DF._call only inside DF; here assume unknown & treat as 0.0
     l30_h = {"era30": None}
     l30_a = {"era30": None}
 
@@ -90,7 +90,7 @@ def build_features_for_game(g: dict,
     # Bullpen + Park
     bullpen_era14_diff = _f((bp14.get(home) if bp14.get(home) is not None else 0.0) -
                             (bp14.get(away) if bp14.get(away) is not None else 0.0))
-    park_factor = _f(DF.cc_park_factor(home))
+    park_factor = DF.cc_park_factor(home)
 
     # Rest / B2B
     home_days_rest = _i(DF.cc_days_rest(home, game_iso))
@@ -102,10 +102,7 @@ def build_features_for_game(g: dict,
     travel_km_home_prev_to_today = _f(km_home)
     travel_km_away_prev_to_today = _f(km_away)
 
-    # Bullpen IP last 3d (kept as uncached disk; quick and already API-cached in sources)
-    # If you want to disk-cache, you can mirror cc_* pattern; usually not necessary.
-    # We'll call sources directly via DF._call isn't exposed here; keep zeros or implement later.
-
+    # Bullpen IP last 3d (left zero unless you add a cc_ wrapper)
     bullpen_ip_last3_home = 0.0
     bullpen_ip_last3_away = 0.0
 
@@ -194,7 +191,7 @@ def build_features_for_range(
     _ = DF.cc_wpct_last30()
     _ = DF.cc_bullpen_era14()
     _ = DF.cc_offense30()
-    _ = DF.cc_probables([g.get("gamePk") for g in games])
+    _ = DF.cc_probables([g.get("gamePk") for g in games if g.get("gamePk")])
 
     rows: List[Dict[str, Any]] = []
     for g in games:
@@ -243,31 +240,3 @@ def fetch_games_with_features(
         only_finals=only_finals,
         required_features=required_features,
     )
-
-
-
-"""
-Separates 'fetch raw games + feature engineering' from routes.
-This calls your advanced cached fetcher in utils.data_fetchers.
-"""
-from typing import Optional
-import pandas as pd
-from utils.data_fetchers import fetch_games_with_features
-
-def build_features_for_range(
-    start_date: str,
-    end_date: str,
-    include_odds: bool = False,
-    include_weather: bool = True,
-    required_features: Optional[list[str]] = None,
-    only_finals: bool = False,  # for predictions we want scheduled too
-) -> pd.DataFrame:
-    return fetch_games_with_features(
-        start_date=start_date,
-        end_date=end_date,
-        include_odds=include_odds,
-        include_weather=include_weather,
-        required_features=required_features,
-        only_finals=only_finals,
-    )
-

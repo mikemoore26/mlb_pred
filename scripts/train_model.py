@@ -17,6 +17,18 @@ from sklearn.metrics import (
     log_loss, brier_score_loss, precision_score, recall_score, f1_score
 )
 
+# scripts/train_model.py
+import os, argparse, joblib, numpy as np, pandas as pd
+from datetime import date
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.utils import shuffle
+
+# Feature fetcher
+from utils.data_fetchers import fetch_games_with_features
+# Import central registry
+from models.registry import MODEL_REGISTRY
+
+
 # Core feature builder
 try:
     from utils.data_fetchers import fetch_games_with_features
@@ -27,74 +39,6 @@ except Exception as e:
 
 META_COLS = ["game_date", "home_team", "away_team", "home_win"]
 
-
-# -------------------------
-# Model builders
-# -------------------------
-def _build_lr_isotonic() -> Tuple[Pipeline, str]:
-    base = Pipeline([
-        ("scale", StandardScaler(with_mean=True, with_std=True)),
-        ("clf", LogisticRegression(max_iter=2000, solver="lbfgs"))
-    ])
-    return base, "isotonic"
-
-def _build_gbdt_isotonic() -> Tuple[GradientBoostingClassifier, str]:
-    base = GradientBoostingClassifier(
-        learning_rate=0.05,
-        n_estimators=600,
-        max_depth=3,
-        subsample=0.8,
-        random_state=42
-    )
-    return base, "isotonic"
-
-
-# -------------------------
-# Registry of model variants
-# -------------------------
-MODEL_REGISTRY: Dict[str, dict] = {
-    "full_model_ml1": {
-        "name": "Full Model ML1 (LR+Iso)",
-        "features": [
-            "team_wpct_diff_season",
-            "team_wpct_diff_30d",
-            "home_advantage",
-            "starter_era_diff",
-            "starter_k9_diff",
-            "starter_bb9_diff",
-            "starter_era30_diff",
-            "bullpen_era14_diff",
-            "park_factor",
-            "home_days_rest",
-            "away_days_rest",
-            "b2b_flag",
-            "wx_temp",
-            "wx_wind_speed",
-            "wx_wind_out_to_cf",
-        ],
-        "builder": _build_lr_isotonic,
-        "default_out": "models/full_model_ml1.pkl",
-    },
-    "full_model_ml2": {
-        "name": "Full Model ML2 (GBDT+Iso)",
-        "features": [
-            "home_advantage",
-            "team_wpct_diff_season",
-            "team_wpct_diff_30d",
-            "starter_era_diff",
-            "starter_k9_diff",
-            "bullpen_era14_diff",
-            "park_factor",
-            "travel_km_home_prev_to_today",
-            "travel_km_away_prev_to_today",
-            "bullpen_ip_last3_home",
-            "bullpen_ip_last3_away",
-            "offense_runs_pg_30d_diff",
-        ],
-        "builder": _build_gbdt_isotonic,
-        "default_out": "models/full_model_ml2.pkl",
-    },
-}
 
 
 # -------------------------

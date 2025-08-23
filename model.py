@@ -42,3 +42,5 @@ def init_db_with_default_admin():
         u.set_password("moore")
         db.session.add(u)
         db.session.commit()
+
+

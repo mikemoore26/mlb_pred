@@ -118,3 +118,10 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     main(args)
+
+
+"""
+python scripts/ensemble_predict.py --model_a models/model_A.pkl --model_b models/model_B.pkl --data PATH/TO/data.csv --label home_win --w_a 0.5 --w_b 0.5 --gate_b 0.0 --out ensemble_preds.csv
+
+
+"""

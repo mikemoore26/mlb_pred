@@ -1,49 +1,58 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>{% block title %}Sports Predict{% endblock %}</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <link rel="stylesheet" href="https://unpkg.com/mvp.css">
-  <style>
-    header nav a { margin-right: .75rem; }
-    .right { float: right; }
-    .muted { color: #888; font-size: .9rem; }
-    table td, table th { white-space: nowrap; }
-  </style>
+  <meta charset="utf-8">
+  <title>MOORE BETs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-<header>
-  <nav>
-    <a href="{{ url_for('main.index') }}">Home</a>
-    <a href="{{ url_for('main.predictions') }}">Predictions</a>
-    {% if current_user.is_authenticated and current_user.is_admin %}
-      <a href="{{ url_for('main.admin') }}">Admin</a>
-      <a href="{{ url_for('main.users') }}">Users</a>
-    {% endif %}
-  </nav>
-  <nav class="right">
-    {% if current_user.is_authenticated %}
-      <span class="muted">Hi, {{ current_user.username }}</span>
-      <a href="{{ url_for('auth.logout') }}">Logout</a>
-    {% else %}
-      <a href="{{ url_for('auth.login') }}">Login</a>
-    {% endif %}
-  </nav>
-</header>
+<body class="bg-slate-50 text-slate-900">
+  <!-- Top brand bar -->
+  <header class="bg-slate-900 text-white">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <a href="{{ url_for('main.index') }}" class="text-2xl font-black tracking-wide">MOORE BETs</a>
+      <nav class="flex gap-4">
+        <a class="hover:underline" href="{{ url_for('main.index') }}">Home</a>
+        <a class="hover:underline" href="{{ url_for('main.predictions') }}">Predictions</a>
+        <a class="hover:underline" href="{{ url_for('settings') }}">Settings</a>
+        <a class="hover:underline" href="{{ url_for('main.contact') }}">Contact</a>
+        {% if current_user.is_authenticated and current_user.is_admin %}
+          <a class="hover:underline text-amber-300" href="{{ url_for('main.admin') }}">Admin</a>
+        {% endif %}
+        {% if current_user.is_authenticated %}
+          <a class="hover:underline" href="{{ url_for('logout') }}">Logout</a>
+        {% else %}
+          <a class="hover:underline" href="{{ url_for('login') }}">Login</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
 
-<main>
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      <section>
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="space-y-2 mb-4">
         {% for category, message in messages %}
-          <p class="{{ category }}">{{ message }}</p>
+          <div class="p-3 rounded text-sm
+            {% if category == 'success' %} bg-green-100 text-green-900
+            {% elif category == 'warning' %} bg-yellow-100 text-yellow-900
+            {% elif category == 'error' %} bg-red-100 text-red-900
+            {% else %} bg-slate-200 text-slate-900 {% endif %}">
+            {{ message }}
+          </div>
         {% endfor %}
-      </section>
-    {% endif %}
-  {% endwith %}
+        </div>
+      {% endif %}
+    {% endwith %}
 
-  {% block content %}{% endblock %}
-</main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="border-t border-slate-200">
+    <div class="max-w-6xl mx-auto px-4 py-6 text-sm text-slate-500">
+      © {{ config.SITE_COPYRIGHT if config and config.SITE_COPYRIGHT else "MOORE BETs" }}
+    </div>
+  </footer>
 </body>
 </html>

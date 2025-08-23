@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Settings</h1>
+<form method="post" class="space-y-4 max-w-md">
+  <!-- Extend with real settings (change password, model choice, etc.) -->
+  <div>
+    <label class="block text-sm font-medium mb-1">Notifications</label>
+    <select class="w-full border rounded p-2 bg-white">
+      <option>Off</option>
+      <option>Email</option>
+    </select>
+  </div>
+  <button class="px-4 py-2 bg-slate-900 text-white rounded">Save</button>
+</form>
+{% endblock %}
