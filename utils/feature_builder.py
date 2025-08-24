@@ -1,4 +1,3 @@
-# utils/feature_builder.py
 from __future__ import annotations
 from typing import Any, Optional, List, Dict
 import pandas as pd
@@ -6,21 +5,25 @@ from dateutil import parser
 
 # Pull cached/raw inputs from the fetch layer (provides cc_* cached helpers)
 from utils import data_fetchers as DF
+from utils import cache  # Explicitly import cache module
 
 META_COLS = ["game_date", "home_team", "away_team", "home_win"]
 
 
 # -------- tiny numeric guards --------
 def _f(x: Any, d: float = 0.0) -> float:
+    """Convert x to float, return d if invalid."""
     try:
         return float(x)
-    except Exception:
+    except (ValueError, TypeError):
         return float(d)
 
+
 def _i(x: Any, d: int = 0) -> int:
+    """Convert x to int, return d if invalid."""
     try:
         return int(x)
-    except Exception:
+    except (ValueError, TypeError):
         return int(d)
 
 
@@ -50,47 +53,45 @@ def build_features_for_game(
     else:
         home_win = None
 
-    # Pre-cached dictionaries (look them up here for standalone usage too)
-    wp_season = DF.cc_wpct_season()
-    wp_30     = DF.cc_wpct_last30()
-    bp14      = DF.cc_bullpen_era14()
-    offense30 = DF.cc_offense30()
+    # Pre-cached dictionaries
+    wp_season = DF.cc_wpct_season() or {}
+    wp_30 = DF.cc_wpct_last30() or {}
+    bp14 = DF.cc_bullpen_era14() or {}
+    offense30 = DF.cc_offense30() or {}
 
     # Probables
     probables = DF.cc_probables([game_pk]) if game_pk else {}
-    ids = (probables.get(game_pk) or {})
+    ids = probables.get(game_pk, {})
     hid, aid = ids.get("home_id"), ids.get("away_id")
 
     # Pitchers
-    s_h = DF.cc_pitcher_season(hid)
-    s_a = DF.cc_pitcher_season(aid)
+    s_h = DF.cc_pitcher_season(hid) or {}
+    s_a = DF.cc_pitcher_season(aid) or {}
 
-    # last-30 ERA (if your sources implements it; default None→0.0 diff)
-    l30_h = {"era30": None}
-    l30_a = {"era30": None}
+    # Last-30 ERA
+    l30_h = DF.cc_pitcher_last30(hid) or {"era30": None}
+    l30_a = DF.cc_pitcher_last30(aid) or {"era30": None}
 
-    # last-3 starts
-    l3_h = DF.cc_pitcher_last3(hid)
-    l3_a = DF.cc_pitcher_last3(aid)
+    # Last-3 starts
+    l3_h = DF.cc_pitcher_last3(hid) or {"era3": None, "kbb3": None}
+    l3_a = DF.cc_pitcher_last3(aid) or {"era3": None, "kbb3": None}
 
     # Team context
-    team_wpct_diff_season = _f((wp_season.get(home, 0.5) or 0.5) - (wp_season.get(away, 0.5) or 0.5))
-    team_wpct_diff_30d    = _f((wp_30.get(home, 0.5) or 0.5) - (wp_30.get(away, 0.5) or 0.5))
+    team_wpct_diff_season = _f(wp_season.get(home, 0.5) - wp_season.get(away, 0.5))
+    team_wpct_diff_30d = _f(wp_30.get(home, 0.5) - wp_30.get(away, 0.5))
     home_advantage = 1
 
     # Starters
-    starter_era_diff   = _f((s_h.get("era")   or 0.0) - (s_a.get("era")   or 0.0))
-    starter_k9_diff    = _f((s_h.get("k9")    or 0.0) - (s_a.get("k9")    or 0.0))
-    starter_bb9_diff   = _f((s_h.get("bb9")   or 0.0) - (s_a.get("bb9")   or 0.0))
-    starter_era30_diff = _f((l30_h.get("era30") or 0.0) - (l30_a.get("era30") or 0.0))
-
-    starter_era3_diff = _f((l3_h.get("era3") or 0.0) - (l3_a.get("era3") or 0.0))
-    starter_kbb3_diff = _f((l3_h.get("kbb3") or 0.0) - (l3_a.get("kbb3") or 0.0))
+    starter_era_diff = _f(s_h.get("era", 0.0) - s_a.get("era", 0.0))
+    starter_k9_diff = _f(s_h.get("k9", 0.0) - s_a.get("k9", 0.0))
+    starter_bb9_diff = _f(s_h.get("bb9", 0.0) - s_a.get("bb9", 0.0))
+    starter_era30_diff = _f(l30_h.get("era30", 0.0) - l30_a.get("era30", 0.0))
+    starter_era3_diff = _f(l3_h.get("era3", 0.0) - l3_a.get("era3", 0.0))
+    starter_kbb3_diff = _f(l3_h.get("kbb3", 0.0) - l3_a.get("kbb3", 0.0))
 
     # Bullpen + Park
-    bullpen_era14_diff = _f((bp14.get(home) if bp14.get(home) is not None else 0.0) -
-                            (bp14.get(away) if bp14.get(away) is not None else 0.0))
-    park_factor = DF.cc_park_factor(home)
+    bullpen_era14_diff = _f(bp14.get(home, 0.0) - bp14.get(away, 0.0))
+    park_factor = _f(DF.cc_park_factor(home))
 
     # Rest / B2B
     home_days_rest = _i(DF.cc_days_rest(home, game_iso))
@@ -102,22 +103,24 @@ def build_features_for_game(
     travel_km_home_prev_to_today = _f(km_home)
     travel_km_away_prev_to_today = _f(km_away)
 
-    # Bullpen IP last 3d (left zero unless you add a cc_ wrapper)
-    bullpen_ip_last3_home = 0.0
-    bullpen_ip_last3_away = 0.0
+    # Bullpen IP last 3 games
+    bullpen_ip_last3_home = _f(DF.cc_bullpen_ip_last3(home, game_iso))
+    bullpen_ip_last3_away = _f(DF.cc_bullpen_ip_last3(away, game_iso))
 
     # Offense 30d diff
-    offense_runs_pg_30d_diff = _f((offense30.get(home, 0.0) or 0.0) - (offense30.get(away, 0.0) or 0.0))
+    offense_runs_pg_30d_diff = _f(offense30.get(home, 0.0) - offense30.get(away, 0.0))
 
     # Weather
-    wx_temp = wx_wind_speed = wx_wind_out_to_cf = 0.0
+    wx_temp = wx_wind_speed = wx_wind_out_to_cf = wind_cf_x_park = 0.0
     if include_weather:
         wx = DF.cc_weather(g)
         if isinstance(wx, dict) and wx:
             wx_temp = _f(wx.get("temp", 0.0))
             wx_wind_speed = _f(wx.get("wind_speed", 0.0))
             wx_wind_out_to_cf = 1.0 if wx.get("wind_out_to_cf") else 0.0
-    wind_cf_x_park = _f(wx_wind_out_to_cf * park_factor)
+            wind_cf_x_park = _f(wx.get("wind_cf_x_park", 0.0))
+        else:
+            print(f"Warning: No weather data for gamePk {game_pk}, venue={(g.get('venue') or {}).get('name')}")
 
     # Elo + Odds
     elo_diff = _f(DF.cc_elo(home, away, game_iso))
@@ -129,37 +132,30 @@ def build_features_for_game(
         "home_team": home,
         "away_team": away,
         "home_win": home_win,
-
         # FEATURES
         "home_advantage": home_advantage,
         "team_wpct_diff_season": team_wpct_diff_season,
         "team_wpct_diff_30d": team_wpct_diff_30d,
-
         "starter_era_diff": starter_era_diff,
         "starter_k9_diff": starter_k9_diff,
         "starter_bb9_diff": starter_bb9_diff,
         "starter_era30_diff": starter_era30_diff,
         "starter_era3_diff": starter_era3_diff,
         "starter_kbb3_diff": starter_kbb3_diff,
-
         "bullpen_era14_diff": bullpen_era14_diff,
         "park_factor": park_factor,
-
         "home_days_rest": home_days_rest,
         "away_days_rest": away_days_rest,
         "b2b_flag": b2b_flag,
-
         "travel_km_home_prev_to_today": travel_km_home_prev_to_today,
         "travel_km_away_prev_to_today": travel_km_away_prev_to_today,
         "bullpen_ip_last3_home": bullpen_ip_last3_home,
         "bullpen_ip_last3_away": bullpen_ip_last3_away,
-
         "offense_runs_pg_30d_diff": offense_runs_pg_30d_diff,
         "wx_temp": wx_temp,
         "wx_wind_speed": wx_wind_speed,
         "wx_wind_out_to_cf": wx_wind_out_to_cf,
         "wind_cf_x_park": wind_cf_x_park,
-
         "elo_diff": elo_diff,
     }
     if include_odds and odds_implied_home_close is not None:
@@ -182,11 +178,32 @@ def build_features_for_range(
       - only_finals=True: training (keeps only completed games and sets home_win).
       - only_finals=False: prediction (keeps scheduled/live games; home_win=None).
     """
-    games = DF.cc_schedule(start_date, end_date) or []
+    # Fetch schedule
+    cache_key = cache._make_key("schedule", start_date, end_date)
+    cached_schedule = cache.load_json("schedule", cache_key, max_age_days=1)
+    if cached_schedule is not None:
+        games = []
+        for date in cached_schedule.get("dates", []):
+            games.extend(date.get("games", []))
+    else:
+        # Fetch games from MLB StatsAPI
+        from utils.safe_get_json import _safe_get_json 
+
+        url = f"https://statsapi.mlb.com/api/v1/schedule?startDate={start_date}&endDate={end_date}&sportId=1"
+        schedule = _safe_get_json(url)
+        if schedule is None:
+            print(f"Error: Failed to fetch schedule from {start_date} to {end_date}")
+            return pd.DataFrame(columns=(required_features or []) + META_COLS)
+        cache.save_json("schedule", schedule, cache_key)
+        games = []
+        for date in schedule.get("dates", []):
+            games.extend(date.get("games", []))
+
     if not games:
+        print(f"No games found for {start_date} to {end_date}")
         return pd.DataFrame(columns=(required_features or []) + META_COLS)
 
-    # warm common caches once (to avoid re-calling inside each row)
+    # Warm common caches once
     _ = DF.cc_wpct_season()
     _ = DF.cc_wpct_last30()
     _ = DF.cc_bullpen_era14()
