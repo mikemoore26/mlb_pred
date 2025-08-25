@@ -1,4 +1,3 @@
-# utils/cache.py
 from __future__ import annotations
 import json
 import hashlib
@@ -15,7 +14,9 @@ def _make_key(prefix: str, *parts: Any) -> str:
     """
     Build a short, unique filename from prefix + parts.
     Every part is stringified and hashed (to avoid long filenames).
+    Ensures no double .json extension.
     """
+    prefix = prefix.replace(".json", "")
     raw = prefix + "|" + "|".join(str(p) for p in parts)
     digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}_{digest}.json"
@@ -23,8 +24,9 @@ def _make_key(prefix: str, *parts: Any) -> str:
 def load_json(cache_type: str, key: str, max_age_days: int = 7) -> Optional[dict]:
     """Load cached JSON data if it exists and is recent."""
     cache_dir = "cache"
-    os.makedirs(cache_dir, exist_ok=True)  # Create cache directory if it doesn't exist
-    filename = os.path.join(cache_dir, f"{cache_type}_{key}.json")
+    os.makedirs(cache_dir, exist_ok=True)
+    key = key.replace(".json.json", ".json")
+    filename = os.path.join(cache_dir, f"{cache_type}_{key}")
     try:
         with open(filename, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -44,8 +46,9 @@ def load_json(cache_type: str, key: str, max_age_days: int = 7) -> Optional[dict
 def save_json(cache_type: str, data: Any, key: str) -> None:
     """Save data to cache as JSON."""
     cache_dir = "cache"
-    os.makedirs(cache_dir, exist_ok=True)  # Create cache directory
-    filename = os.path.join(cache_dir, f"{cache_type}_{key}.json")
+    os.makedirs(cache_dir, exist_ok=True)
+    key = key.replace(".json.json", ".json")
+    filename = os.path.join(cache_dir, f"{cache_type}_{key}")
     try:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(data, f)

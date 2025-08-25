@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from utils import cache
 
+from utils.safe_get_json import _safe_get_json
 
 load_dotenv()  # Load .env variables
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")  # Loaded from .env
@@ -25,15 +26,6 @@ _STANDINGS_CACHE: Dict[str, Dict[str, float]] = {}
 _LAST_GAME_DATE_CACHE: Dict[str, date] = {}
 _PARK_DATA: Optional[dict] = None
 _BALLPARK_COORDS: Optional[dict] = None  # Format: {"Venue Name": [lat, lon, cf_direction_degrees]}
-
-def _safe_get_json(url: str, timeout: int = 12):
-    try:
-        r = _SESSION.get(url, timeout=timeout)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"Error fetching {url}: {str(e)}")
-        return None
 
 # ---------------------------
 # Schedule utilities
