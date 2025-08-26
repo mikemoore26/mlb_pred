@@ -1,149 +1,159 @@
 from __future__ import annotations
 from typing import Any, Optional, List, Dict
+import traceback
 import pandas as pd
 from dateutil import parser
 import datetime
-import sys
 
 # Pull cached/raw inputs from the fetch layer
 from utils import data_fetchers as DF
 from utils import cache
-from utils.safe_get_json import _safe_get_json  # <-- FIX: use safe_get_json directly
+from utils.safe_get_json import _safe_get_json
+
+# Composed feature blocks
+from utils.design_features import (
+    f, i,  # coercers that never throw (f(None)->0.0, i(None)->0)
+    team_form,               # -> {"home_advantage", "team_wpct_diff_season", "team_wpct_diff_30d"}
+    park_factor_feature,     # -> {"park_factor"}
+    pitcher_diffs,           # -> {"starter_era_diff", "starter_k9_diff", "starter_bb9_diff", "starter_era30_diff", "starter_era3_diff", "starter_kbb3_diff"}
+    bullpen_diff_era14,      # -> {"bullpen_era14_diff"}
+    bullpen_ip_last3,        # -> {"bullpen_ip_last3_home", "bullpen_ip_last3_away"}
+    rest_b2b,                # -> {"home_days_rest", "away_days_rest", "b2b_flag"}
+    travel_km,               # -> {"travel_km_home_prev_to_today", "travel_km_away_prev_to_today"}
+    weather_block,           # -> {"wx_temp","wx_wind_speed","wx_wind_out_to_cf","wind_cf_x_park"}
+    elo_feature,             # -> {"elo_diff"}
+    odds_feature,            # -> {"odds_implied_home_close"} or {}
+)
 
 META_COLS = ["game_date", "home_team", "away_team", "home_win"]
 
-# -------- tiny numeric guards --------
-def _f(x: Any, d: float = 0.0) -> float:
-    try:
-        return float(x)
-    except (ValueError, TypeError):
-        return float(d)
+def _status_of(g: dict) -> str:
+    return ((g.get("status") or {}).get("detailedState") or "").lower()
 
-def _i(x: Any, d: int = 0) -> int:
+def _probable_ids_from_schedule(g: dict) -> tuple[Optional[int], Optional[int]]:
+    """Best-effort probable pitcher IDs from the schedule item itself."""
     try:
-        return int(x)
-    except (ValueError, TypeError):
-        return int(d)
+        hid = ((g["teams"]["home"].get("probablePitcher") or {}).get("id"))
+        aid = ((g["teams"]["away"].get("probablePitcher") or {}).get("id"))
+        return hid, aid
+    except Exception:
+        return None, None
 
 # -------- single-game feature builder --------
 def build_features_for_game(
     g: dict,
     include_odds: bool = False,
-    include_weather: bool = True
+    include_weather: bool = True,
 ) -> Dict[str, Any]:
-    status = ((g.get("status") or {}).get("detailedState") or "").lower()
-
-    home = g["teams"]["home"]["team"]["name"]
-    away = g["teams"]["away"]["team"]["name"]
-    game_dt = parser.isoparse(g["gameDate"])
+    """
+    Build all features for a single schedule JSON game record.
+    This function is defensive: any None/invalid numeric value is coerced via f()/i().
+    """
+    # Minimal meta
+    status = _status_of(g)
+    home = (((g.get("teams") or {}).get("home") or {}).get("team") or {}).get("name", "")
+    away = (((g.get("teams") or {}).get("away") or {}).get("team") or {}).get("name", "")
     game_pk = g.get("gamePk")
-    game_iso = game_dt.date().isoformat()
+    try:
+        game_dt = parser.isoparse(g["gameDate"])
+        game_iso = game_dt.date().isoformat()
+    except Exception:
+        # if gameDate is malformed, default to today's date to avoid key errors downstream
+        game_iso = datetime.date.today().isoformat()
 
     # META label
     if status == "final":
-        hs = _i(g["teams"]["home"].get("score"))
-        as_ = _i(g["teams"]["away"].get("score"))
+        hs = i(((g.get("teams") or {}).get("home") or {}).get("score"))
+        as_ = i(((g.get("teams") or {}).get("away") or {}).get("score"))
         home_win = 1 if hs > as_ else 0
     else:
         home_win = None
 
-    # cached dicts (always present; may be partial)
-    wp_season = DF.cc_wpct_season() or {}
-    wp_30     = DF.cc_wpct_last30() or {}
-    bp14      = DF.cc_bullpen_era14() or {}
-    offense30 = DF.cc_offense30() or {}
+    # Probables (best-effort): seed with schedule, then enrich from cached probables
+    sch_hid, sch_aid = _probable_ids_from_schedule(g)
+    prob = DF.cc_probables([game_pk]) if game_pk else {}
+    ids = prob.get(game_pk) or {}
+    hid = ids.get("home_id", sch_hid)
+    aid = ids.get("away_id", sch_aid)
 
-    # probables + pitcher stats
-    probables = DF.cc_probables([game_pk]) if game_pk else {}
-    ids = (probables.get(game_pk) or {}) if isinstance(probables, dict) else {}
-    hid, aid = ids.get("home_id"), ids.get("away_id")
+    # Collect each block with try/except; keep track for debug
+    blocks: Dict[str, Dict[str, Any]] = {}
+    errors: List[str] = []
 
-    s_h  = DF.cc_pitcher_season(hid) or {}
-    s_a  = DF.cc_pitcher_season(aid) or {}
-    l30h = DF.cc_pitcher_last30(hid) or {"era30": None}
-    l30a = DF.cc_pitcher_last30(aid) or {"era30": None}
-    l3h  = DF.cc_pitcher_last3(hid)  or {"era3": None, "kbb3": None}
-    l3a  = DF.cc_pitcher_last3(aid)  or {"era3": None, "kbb3": None}
+    def _run_block(name: str, fn, *args, **kwargs):
+        try:
+            out = fn(*args, **kwargs) or {}
+            if not isinstance(out, dict):
+                raise TypeError(f"{name} returned non-dict: {type(out)}")
+            # Coerce all numerics inside this block
+            safe_out: Dict[str, Any] = {}
+            for k, v in out.items():
+                # meta & booleans can stay as-is
+                if k in ("home_team", "away_team", "game_date", "odds_note"):
+                    safe_out[k] = v
+                else:
+                    # Try numeric coercion; if it fails, fallback 0.0
+                    try:
+                        # preserve ints for *_flag or *_days like fields; else float
+                        if isinstance(v, bool):
+                            safe_out[k] = int(v)
+                        elif isinstance(v, int):
+                            safe_out[k] = int(v)
+                        else:
+                            safe_out[k] = f(v, 0.0)
+                    except Exception:
+                        safe_out[k] = 0.0
+            blocks[name] = safe_out
+        except Exception as e:
+            errors.append(f"[{name}] {type(e).__name__}: {e}")
+            blocks[name] = {}
 
-    # context diffs (home - away) — COERCE EACH SIDE FIRST
-    team_wpct_diff_season = _f(wp_season.get(home, 0.5)) - _f(wp_season.get(away, 0.5))
-    team_wpct_diff_30d    = _f(wp_30.get(home, 0.5))     - _f(wp_30.get(away, 0.5))
-    home_advantage = 1
+    # Blocks (arguments chosen to minimize repeated lookups)
+    _run_block("team_form",         team_form,         home, away)
+    _run_block("park_factor",       park_factor_feature, home)
+    _run_block("pitcher_diffs",     pitcher_diffs,     hid, aid)  # handles None IDs internally
+    _run_block("bullpen_era14",     bullpen_diff_era14, home, away)
+    _run_block("bullpen_ip_last3",  bullpen_ip_last3,  home, away, game_iso)
+    _run_block("rest_b2b",          rest_b2b,          home, away, game_iso)
+    _run_block("travel_km",         travel_km,         home, away, game_iso)
+    _run_block("weather",           weather_block,     g, blocks.get("park_factor", {}).get("park_factor", 100.0), include_weather)
+    _run_block("elo",               elo_feature,       home, away, game_iso)
+    _run_block("odds",              odds_feature,      game_pk, include_odds)
 
-    starter_era_diff   = _f(s_h.get("era"))    - _f(s_a.get("era"))
-    starter_k9_diff    = _f(s_h.get("k9"))     - _f(s_a.get("k9"))
-    starter_bb9_diff   = _f(s_h.get("bb9"))    - _f(s_a.get("bb9"))
-    starter_era30_diff = _f(l30h.get("era30")) - _f(l30a.get("era30"))
-    starter_era3_diff  = _f(l3h.get("era3"))   - _f(l3a.get("era3"))
-    starter_kbb3_diff  = _f(l3h.get("kbb3"))   - _f(l3a.get("kbb3"))
-
-    bullpen_era14_diff = _f(bp14.get(home)) - _f(bp14.get(away))
-    park_factor = _f(DF.cc_park_factor(home))
-
-    home_days_rest = _i(DF.cc_days_rest(home, game_iso))
-    away_days_rest = _i(DF.cc_days_rest(away, game_iso))
-    b2b_flag = 1 if (home_days_rest == 0 or away_days_rest == 0) else 0
-
-    km_home, km_away = DF.cc_travel(home, away, game_iso)
-    travel_km_home_prev_to_today = _f(km_home)
-    travel_km_away_prev_to_today = _f(km_away)
-
-    bullpen_ip_last3_home = _f(DF.cc_bullpen_ip_last3(home, game_iso))
-    bullpen_ip_last3_away = _f(DF.cc_bullpen_ip_last3(away, game_iso))
-
-    offense_runs_pg_30d_diff = _f(offense30.get(home)) - _f(offense30.get(away))
-
-    # weather
-    wx_temp = wx_wind_speed = wx_wind_out_to_cf = 0.0
-    if include_weather:
-        wx = DF.cc_weather(g)
-        if isinstance(wx, dict) and wx:
-            wx_temp = _f(wx.get("temp"))
-            wx_wind_speed = _f(wx.get("wind_speed"))
-            wx_wind_out_to_cf = 1.0 if wx.get("wind_out_to_cf") else 0.0
-    wind_cf_x_park = _f(wx_wind_out_to_cf * park_factor)
-
-    # elo + odds
-    elo_diff = _f(DF.cc_elo(home, away, game_iso))
-    odds_implied_home_close = DF.cc_odds(game_pk) if include_odds else None
-
-    row = {
-        # META
+    # Merge blocks into one row
+    row: Dict[str, Any] = {
         "game_date": game_iso,
         "home_team": home,
         "away_team": away,
         "home_win": home_win,
-
-        # FEATURES
-        "home_advantage": home_advantage,
-        "team_wpct_diff_season": team_wpct_diff_season,
-        "team_wpct_diff_30d": team_wpct_diff_30d,
-        "starter_era_diff": starter_era_diff,
-        "starter_k9_diff": starter_k9_diff,
-        "starter_bb9_diff": starter_bb9_diff,
-        "starter_era30_diff": starter_era30_diff,
-        "starter_era3_diff": starter_era3_diff,
-        "starter_kbb3_diff": starter_kbb3_diff,
-        "bullpen_era14_diff": bullpen_era14_diff,
-        "park_factor": park_factor,
-        "home_days_rest": home_days_rest,
-        "away_days_rest": away_days_rest,
-        "b2b_flag": b2b_flag,
-        "travel_km_home_prev_to_today": travel_km_home_prev_to_today,
-        "travel_km_away_prev_to_today": travel_km_away_prev_to_today,
-        "bullpen_ip_last3_home": bullpen_ip_last3_home,
-        "bullpen_ip_last3_away": bullpen_ip_last3_away,
-        "offense_runs_pg_30d_diff": offense_runs_pg_30d_diff,
-        "wx_temp": wx_temp,
-        "wx_wind_speed": wx_wind_speed,
-        "wx_wind_out_to_cf": wx_wind_out_to_cf,
-        "wind_cf_x_park": wind_cf_x_park,
-        "elo_diff": elo_diff,
     }
-    if include_odds and odds_implied_home_close is not None:
-        row["odds_implied_home_close"] = _f(odds_implied_home_close)
+    for b in ("team_form", "pitcher_diffs", "bullpen_era14", "park_factor", "rest_b2b",
+              "travel_km", "bullpen_ip_last3", "weather", "elo", "odds"):
+        row.update(blocks.get(b, {}))
+
+    # Final global coercion pass to bulletproof numbers
+    for k, v in list(row.items()):
+        if k in ("game_date", "home_team", "away_team", "home_win"):
+            continue
+        # flags/days can be ints; others as float
+        try:
+            if k.endswith("_flag") or k.endswith("_days_rest"):
+                row[k] = int(v) if v is not None else 0
+            else:
+                row[k] = f(v, 0.0)
+        except Exception:
+            row[k] = 0.0
+
+    # If there were block errors, print one compact line for debugging
+    if errors:
+        print(
+            f"[feature_builder][WARN] Block errors for gamePk={game_pk} "
+            f"({home} vs {away} on {game_iso}; status={status}): "
+            + " | ".join(errors)
+        )
 
     return row
+
 
 # -------- batch/range builder --------
 def build_features_for_range(
@@ -157,10 +167,11 @@ def build_features_for_range(
     """
     Build a DataFrame of meta + features for games in [start_date, end_date].
     """
-    # Future date guard: if training but end is today/future, flip to prediction mode
+    # If training (only_finals) but end is today/future, flip to prediction mode
     try:
-        end_date_obj = datetime.date.fromisoformat(end_date)
-        if end_date_obj >= datetime.date.today() and only_finals:
+        end_d = datetime.date.fromisoformat(end_date)
+        if end_d >= datetime.date.today() and only_finals:
+            print(f"[feature_builder] end_date={end_date} >= today; forcing only_finals=False")
             only_finals = False
     except Exception:
         pass
@@ -175,30 +186,27 @@ def build_features_for_range(
             "https://statsapi.mlb.com/api/v1/schedule"
             f"?startDate={start_date}&endDate={end_date}&sportId=1&hydrate=probablePitchers"
         )
-        schedule = _safe_get_json(url)  # <-- FIX: use imported helper
-        if schedule is None:
+        schedule = _safe_get_json(url)
+        if not schedule:
+            print(f"[feature_builder][ERROR] schedule fetch failed [{start_date}..{end_date}]")
             return pd.DataFrame(columns=(required_features or []) + META_COLS)
         cache.save_json("schedule", schedule, cache_key)
         games = [g for d in schedule.get("dates", []) for g in d.get("games", [])]
 
     if not games:
+        print(f"[feature_builder][WARN] No games in range {start_date}..{end_date}")
         return pd.DataFrame(columns=(required_features or []) + META_COLS)
-    
-        # ... after you computed `games` list from schedule ...
 
-    # Seed probables cache directly from the schedule (quietly)
+    # Seed probables cache from schedule (quietly)
     try:
         batch_seed = {}
         for g in games:
             pk = g.get("gamePk")
             if not pk:
                 continue
-            home_id = (g.get("teams", {}).get("home", {}).get("probablePitcher", {}) or {}).get("id")
-            away_id = (g.get("teams", {}).get("away", {}).get("probablePitcher", {}) or {}).get("id")
-            if home_id or away_id:
-                rec = {"home_id": home_id, "away_id": away_id}
-            else:
-                rec = {}  # negative cache if schedule has none
+            home_id = ((g.get("teams", {}).get("home", {}).get("probablePitcher", {}) or {}).get("id"))
+            away_id = ((g.get("teams", {}).get("away", {}).get("probablePitcher", {}) or {}).get("id"))
+            rec = {"home_id": home_id, "away_id": away_id} if (home_id or away_id) else {}
             per_key = cache._make_key("probables", pk)
             cache.save_json("probables", rec, per_key)
             batch_seed[pk] = rec
@@ -208,8 +216,7 @@ def build_features_for_range(
     except Exception:
         pass
 
-
-    # warm caches once
+    # Warm common caches once
     _ = DF.cc_wpct_season()
     _ = DF.cc_wpct_last30()
     _ = DF.cc_bullpen_era14()
@@ -217,14 +224,30 @@ def build_features_for_range(
     _ = DF.cc_probables([g.get("gamePk") for g in games if g.get("gamePk")])
 
     rows: List[Dict[str, Any]] = []
+    skipped = 0
+
     for g in games:
-        status = ((g.get("status") or {}).get("detailedState") or "").lower()
-        if only_finals and status != "final":
-            continue
-        rows.append(build_features_for_game(g, include_odds=include_odds, include_weather=include_weather))
+        try:
+            status = _status_of(g)
+            if only_finals and status != "final":
+                continue
+            rows.append(build_features_for_game(g, include_odds=include_odds, include_weather=include_weather))
+        except Exception as e:
+            skipped += 1
+            pk = g.get("gamePk")
+            home = (((g.get("teams") or {}).get("home") or {}).get("team") or {}).get("name", "")
+            away = (((g.get("teams") or {}).get("away") or {}).get("team") or {}).get("name", "")
+            print(
+                f"[feature_builder][ERROR] build row failed (gamePk={pk}, {home} vs {away}): {type(e).__name__}: {e}"
+            )
+            traceback.print_exc(limit=1)
 
     df = pd.DataFrame(rows)
 
+    if skipped:
+        print(f"[feature_builder][WARN] Skipped {skipped} game(s) due to errors; see logs above.")
+
+    # Column alignment if caller requests a specific set
     if required_features:
         want = list(dict.fromkeys(list(required_features) + META_COLS))
         for c in want:
