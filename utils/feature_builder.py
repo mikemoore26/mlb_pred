@@ -16,8 +16,8 @@ from utils.design_features import (
     team_form,               # -> {"home_advantage", "team_wpct_diff_season", "team_wpct_diff_30d"}
     park_factor_feature,     # -> {"park_factor"}
     pitcher_diffs,           # -> {"starter_era_diff", "starter_k9_diff", "starter_bb9_diff", "starter_era30_diff", "starter_era3_diff", "starter_kbb3_diff"}
-    bullpen_diff_era14,      # -> {"bullpen_era14_diff"}
-    bullpen_ip_last3,        # -> {"bullpen_ip_last3_home", "bullpen_ip_last3_away"}
+    cc_bullpen_era14,      # -> {"bullpen_era14_diff"}
+    cc_bullpen_ip_last3,        # -> {"bullpen_ip_last3_home", "bullpen_ip_last3_away"}
     rest_b2b,                # -> {"home_days_rest", "away_days_rest", "b2b_flag"}
     travel_km,               # -> {"travel_km_home_prev_to_today", "travel_km_away_prev_to_today"}
     weather_block,           # -> {"wx_temp","wx_wind_speed","wx_wind_out_to_cf","wind_cf_x_park"}
@@ -112,8 +112,8 @@ def build_features_for_game(
     _run_block("team_form",         team_form,         home, away)
     _run_block("park_factor",       park_factor_feature, home)
     _run_block("pitcher_diffs",     pitcher_diffs,     hid, aid)  # handles None IDs internally
-    _run_block("bullpen_era14",     bullpen_diff_era14, home, away)
-    _run_block("bullpen_ip_last3",  bullpen_ip_last3,  home, away, game_iso)
+    _run_block("bullpen_era14",     cc_bullpen_era14, home, away)
+    _run_block("bullpen_ip_last3",  cc_bullpen_ip_last3,  home, away, game_iso)
     _run_block("rest_b2b",          rest_b2b,          home, away, game_iso)
     _run_block("travel_km",         travel_km,         home, away, game_iso)
     _run_block("weather",           weather_block,     g, blocks.get("park_factor", {}).get("park_factor", 100.0), include_weather)
