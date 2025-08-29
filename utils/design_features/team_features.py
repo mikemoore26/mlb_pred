@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Dict
 from utils import data_fetchers as DF
-from utils.design_features._common import f
+from utils.design_features._common import parse_ip_to_float as f
 
 DEBUG_TEAM = False
 

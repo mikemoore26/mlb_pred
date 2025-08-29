@@ -245,6 +245,10 @@ def cc_pitch_lastx(
             ip = yby["ip"]; games = yby["games"]; starts = None
             season_fallback = yby["season"]
 
+
+
+        # ... inside cc_pitch_lastx right before cache.save_json(...)
+
     out = {
         "era": (float(era) if era is not None else None),
         "k9": (float(k9) if k9 is not None else None),
@@ -253,13 +257,16 @@ def cc_pitch_lastx(
         "games": int(games or 0),
         "starts": int(starts or 0) if starts is not None else 0,
         "window_days": int(days),
+
+        # NEW: return totals so callers don’t have to re-derive them
+        "k": (float(ip) * float(k9) / 9.0) if (ip and k9) else None,
+        "bb": (float(ip) * float(bb9) / 9.0) if (ip and bb9) else None,
     }
     if season_fallback is not None:
         out["season_fallback"] = int(season_fallback)
 
     cache.save_json("p_lastx", out, k)
     return out
-
 
 # --------- Back-compat wrappers ---------
 def cc_pitcher_last30(player_id: Optional[int]) -> Dict[str, Optional[float]]:

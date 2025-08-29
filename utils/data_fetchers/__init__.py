@@ -49,6 +49,9 @@ from utils.data_fetchers.weather import cc_weather
 # -------- Elo & Odds (mocked unless you wire real APIs) --------
 from utils.data_fetchers.odds_elo import cc_elo, cc_odds
 
+from utils.data_fetchers.travel import cc_travel
+
+from utils.data_fetchers.odds_live import fetch_live_odds_df
 
 # ---------------- Smoke Test ----------------
 if __name__ == "__main__":

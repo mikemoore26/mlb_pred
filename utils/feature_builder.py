@@ -1,3 +1,4 @@
+# utils/feature_builder.py
 from __future__ import annotations
 from typing import Any, Optional, List, Dict
 import traceback
@@ -9,19 +10,21 @@ import datetime
 from utils import data_fetchers as DF
 from utils import cache
 from utils.safe_get_json import _safe_get_json
+from utils.design_features._common import f, i
 
-# Composed feature blocks
+# Elo (DataFrame-level)
+from utils.design_features.elo_features import elo_feature
+
+# Composed per-game blocks (return small dicts)
 from utils.design_features import (
-    f, i,  # coercers that never throw (f(None)->0.0, i(None)->0)
-    team_form,               # -> {"home_advantage", "team_wpct_diff_season", "team_wpct_diff_30d"}
+    team_form,               # -> {...}
     park_factor_feature,     # -> {"park_factor"}
-    pitcher_diffs,           # -> {"starter_era_diff", "starter_k9_diff", "starter_bb9_diff", "starter_era30_diff", "starter_era3_diff", "starter_kbb3_diff"}
-    cc_bullpen_era14,      # -> {"bullpen_era14_diff"}
-    cc_bullpen_ip_last3,        # -> {"bullpen_ip_last3_home", "bullpen_ip_last3_away"}
-    rest_b2b,                # -> {"home_days_rest", "away_days_rest", "b2b_flag"}
-    travel_km,               # -> {"travel_km_home_prev_to_today", "travel_km_away_prev_to_today"}
+    pitcher_diffs,           # -> {...}
+    bullpen_diff_era14,      # -> {"bullpen_era14_diff"}
+    bullpen_ip_last3,        # -> {"bullpen_ip_last3_home","bullpen_ip_last3_away"}
+    rest_b2b,                # -> {"home_days_rest","away_days_rest","b2b_flag"}
+    travel_km,               # -> {"travel_km_home_prev_to_today","travel_km_away_prev_to_today"}
     weather_block,           # -> {"wx_temp","wx_wind_speed","wx_wind_out_to_cf","wind_cf_x_park"}
-    elo_feature,             # -> {"elo_diff"}
     odds_feature,            # -> {"odds_implied_home_close"} or {}
 )
 
@@ -31,7 +34,6 @@ def _status_of(g: dict) -> str:
     return ((g.get("status") or {}).get("detailedState") or "").lower()
 
 def _probable_ids_from_schedule(g: dict) -> tuple[Optional[int], Optional[int]]:
-    """Best-effort probable pitcher IDs from the schedule item itself."""
     try:
         hid = ((g["teams"]["home"].get("probablePitcher") or {}).get("id"))
         aid = ((g["teams"]["away"].get("probablePitcher") or {}).get("id"))
@@ -47,9 +49,8 @@ def build_features_for_game(
 ) -> Dict[str, Any]:
     """
     Build all features for a single schedule JSON game record.
-    This function is defensive: any None/invalid numeric value is coerced via f()/i().
+    Defensive: any None/invalid numeric is coerced via f()/i().
     """
-    # Minimal meta
     status = _status_of(g)
     home = (((g.get("teams") or {}).get("home") or {}).get("team") or {}).get("name", "")
     away = (((g.get("teams") or {}).get("away") or {}).get("team") or {}).get("name", "")
@@ -58,25 +59,25 @@ def build_features_for_game(
         game_dt = parser.isoparse(g["gameDate"])
         game_iso = game_dt.date().isoformat()
     except Exception:
-        # if gameDate is malformed, default to today's date to avoid key errors downstream
         game_iso = datetime.date.today().isoformat()
 
-    # META label
+    # META label + (optionally) runs for margin-aware Elo
     if status == "final":
         hs = i(((g.get("teams") or {}).get("home") or {}).get("score"))
         as_ = i(((g.get("teams") or {}).get("away") or {}).get("score"))
         home_win = 1 if hs > as_ else 0
     else:
         home_win = None
+        hs = None
+        as_ = None
 
-    # Probables (best-effort): seed with schedule, then enrich from cached probables
+    # Probables
     sch_hid, sch_aid = _probable_ids_from_schedule(g)
     prob = DF.cc_probables([game_pk]) if game_pk else {}
     ids = prob.get(game_pk) or {}
     hid = ids.get("home_id", sch_hid)
     aid = ids.get("away_id", sch_aid)
 
-    # Collect each block with try/except; keep track for debug
     blocks: Dict[str, Dict[str, Any]] = {}
     errors: List[str] = []
 
@@ -85,16 +86,12 @@ def build_features_for_game(
             out = fn(*args, **kwargs) or {}
             if not isinstance(out, dict):
                 raise TypeError(f"{name} returned non-dict: {type(out)}")
-            # Coerce all numerics inside this block
             safe_out: Dict[str, Any] = {}
             for k, v in out.items():
-                # meta & booleans can stay as-is
                 if k in ("home_team", "away_team", "game_date", "odds_note"):
                     safe_out[k] = v
                 else:
-                    # Try numeric coercion; if it fails, fallback 0.0
                     try:
-                        # preserve ints for *_flag or *_days like fields; else float
                         if isinstance(v, bool):
                             safe_out[k] = int(v)
                         elif isinstance(v, int):
@@ -108,34 +105,35 @@ def build_features_for_game(
             errors.append(f"[{name}] {type(e).__name__}: {e}")
             blocks[name] = {}
 
-    # Blocks (arguments chosen to minimize repeated lookups)
-    _run_block("team_form",         team_form,         home, away)
+    # Blocks (NO per-game Elo here)
+    _run_block("team_form",         team_form,           home, away)
     _run_block("park_factor",       park_factor_feature, home)
-    _run_block("pitcher_diffs",     pitcher_diffs,     hid, aid)  # handles None IDs internally
-    _run_block("bullpen_era14",     cc_bullpen_era14, home, away)
-    _run_block("bullpen_ip_last3",  cc_bullpen_ip_last3,  home, away, game_iso)
-    _run_block("rest_b2b",          rest_b2b,          home, away, game_iso)
-    _run_block("travel_km",         travel_km,         home, away, game_iso)
-    _run_block("weather",           weather_block,     g, blocks.get("park_factor", {}).get("park_factor", 100.0), include_weather)
-    _run_block("elo",               elo_feature,       home, away, game_iso)
-    _run_block("odds",              odds_feature,      game_pk, include_odds)
+    _run_block("pitcher_diffs",     pitcher_diffs,       hid, aid)
+    _run_block("bullpen_era14",     bullpen_diff_era14,  home, away)
+    _run_block("bullpen_ip_last3",  bullpen_ip_last3,    home, away, game_iso)
+    _run_block("rest_b2b",          rest_b2b,            home, away, game_iso)
+    _run_block("travel_km",         travel_km,           home, away, game_iso)
+    _run_block("weather",           weather_block,       g, blocks.get("park_factor", {}).get("park_factor", 100.0), include_weather)
+    _run_block("odds",              odds_feature,        game_pk, include_odds)
 
-    # Merge blocks into one row
+    # Merge into one row
     row: Dict[str, Any] = {
         "game_date": game_iso,
         "home_team": home,
         "away_team": away,
         "home_win": home_win,
+        # include runs so Elo can scale K by margin (None when not final)
+        "home_runs": hs,
+        "away_runs": as_,
     }
     for b in ("team_form", "pitcher_diffs", "bullpen_era14", "park_factor", "rest_b2b",
-              "travel_km", "bullpen_ip_last3", "weather", "elo", "odds"):
+              "travel_km", "bullpen_ip_last3", "weather", "odds"):
         row.update(blocks.get(b, {}))
 
-    # Final global coercion pass to bulletproof numbers
+    # Final numeric coercion
     for k, v in list(row.items()):
         if k in ("game_date", "home_team", "away_team", "home_win"):
             continue
-        # flags/days can be ints; others as float
         try:
             if k.endswith("_flag") or k.endswith("_days_rest"):
                 row[k] = int(v) if v is not None else 0
@@ -144,14 +142,12 @@ def build_features_for_game(
         except Exception:
             row[k] = 0.0
 
-    # If there were block errors, print one compact line for debugging
     if errors:
         print(
             f"[feature_builder][WARN] Block errors for gamePk={game_pk} "
             f"({home} vs {away} on {game_iso}; status={status}): "
             + " | ".join(errors)
         )
-
     return row
 
 
@@ -164,10 +160,6 @@ def build_features_for_range(
     only_finals: bool = True,
     required_features: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    """
-    Build a DataFrame of meta + features for games in [start_date, end_date].
-    """
-    # If training (only_finals) but end is today/future, flip to prediction mode
     try:
         end_d = datetime.date.fromisoformat(end_date)
         if end_d >= datetime.date.today() and only_finals:
@@ -176,7 +168,6 @@ def build_features_for_range(
     except Exception:
         pass
 
-    # Cached schedule
     cache_key = cache._make_key("schedule", start_date, end_date)
     cached_schedule = cache.load_json("schedule", cache_key, max_age_days=1)
     if cached_schedule is not None:
@@ -216,7 +207,7 @@ def build_features_for_range(
     except Exception:
         pass
 
-    # Warm common caches once
+    # Warm caches
     _ = DF.cc_wpct_season()
     _ = DF.cc_wpct_last30()
     _ = DF.cc_bullpen_era14()
@@ -237,17 +228,18 @@ def build_features_for_range(
             pk = g.get("gamePk")
             home = (((g.get("teams") or {}).get("home") or {}).get("team") or {}).get("name", "")
             away = (((g.get("teams") or {}).get("away") or {}).get("team") or {}).get("name", "")
-            print(
-                f"[feature_builder][ERROR] build row failed (gamePk={pk}, {home} vs {away}): {type(e).__name__}: {e}"
-            )
+            print(f"[feature_builder][ERROR] build row failed (gamePk={pk}, {home} vs {away}): {type(e).__name__}: {e}")
             traceback.print_exc(limit=1)
 
     df = pd.DataFrame(rows)
 
+    # Attach Elo once for the entire batch (chronological)
+    df = df.sort_values("game_date").reset_index(drop=True)
+    df = elo_feature(df)
+
     if skipped:
         print(f"[feature_builder][WARN] Skipped {skipped} game(s) due to errors; see logs above.")
 
-    # Column alignment if caller requests a specific set
     if required_features:
         want = list(dict.fromkeys(list(required_features) + META_COLS))
         for c in want:
@@ -264,6 +256,5 @@ def build_features_for_range(
 
     return df
 
-# compatibility alias
 def fetch_games_with_features(*args, **kwargs) -> pd.DataFrame:
     return build_features_for_range(*args, **kwargs)

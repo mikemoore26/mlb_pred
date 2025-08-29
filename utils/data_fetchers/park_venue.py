@@ -73,22 +73,63 @@ def coords_from_venue_name(venue_name: Optional[str]) -> Tuple[Optional[float], 
     try: return float(row[0]), float(row[1])
     except Exception: return (None,None)
 
-def cc_venue_latlon_from_gamepk(game_pk: int):
-    if not game_pk: return (None,None)
-    vkey = cache._make_key("venue_coord", game_pk)
-    hit = cache.load_json("venue_coord", vkey, max_age_days=60)
-    if isinstance(hit, dict) and ("lat" in hit or "lon" in hit):
-        try:
-            return (float(hit["lat"]) if hit["lat"] is not None else None,
-                    float(hit["lon"]) if hit["lon"] is not None else None)
-        except Exception: pass
-    data = _safe_get_json(f"https://statsapi.mlb.com/api/v1/game/{game_pk}/feed/live") or {}
-    loc = (((data.get("gameData") or {}).get("venue") or {}).get("location") or {})
-    lat, lon = loc.get("latitude"), loc.get("longitude")
-    latf = float(lat) if lat not in (None,"") else None
-    lonf = float(lon) if lon not in (None,"") else None
-    if latf is None or lonf is None:
-        venue = ((data.get("gameData") or {}).get("venue") or {}).get("name")
-        latf, lonf = coords_from_venue_name(venue)
-    cache.save_json("venue_coord", {"lat":latf,"lon":lonf}, vkey)
-    return (latf, lonf)
+def cc_venue_latlon_from_gamepk(game_pk: int) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Return (lat, lon) for a game's venue. Uses cache, then:
+      - live feed: /api/v1.1/game/{gamePk}/feed/live → gameData.venue.location
+      - venues endpoint if needed
+    """
+    ck = cache._make_key("venue_coord", game_pk)
+    hit = cache.load_json("venue_coord", ck, max_age_days=365)
+    if isinstance(hit, dict):
+        return hit.get("lat"), hit.get("lon")
+
+    lat = lon = None
+    try:
+        feed = _safe_get_json(f"https://statsapi.mlb.com/api/v1.1/game/{int(game_pk)}/feed/live") or {}
+        venue = (feed.get("gameData") or {}).get("venue") or {}
+        loc = venue.get("location") or {}
+        lat = loc.get("latitude"); lon = loc.get("longitude")
+        if lat is None or lon is None:
+            vid = venue.get("id")
+            if vid:
+                # venue endpoint fallback
+                vdat = _safe_get_json(f"https://statsapi.mlb.com/api/v1/venues/{int(vid)}") or {}
+                vlist = vdat.get("venues") or []
+                if vlist:
+                    vloc = (vlist[0].get("location") or {})
+                    lat = lat or vloc.get("latitude")
+                    lon = lon or vloc.get("longitude")
+    except Exception:
+        pass
+
+    out = {"lat": (float(lat) if lat is not None else None),
+           "lon": (float(lon) if lon is not None else None)}
+    cache.save_json("venue_coord", out, ck)
+    return out["lat"], out["lon"]
+
+# utils/data_fetchers/park_venue.py  (append near bottom)
+
+
+def _venue_latlon_from_venue_id(venue_id: int) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Look up (lat, lon) from the MLB venues endpoint. Cached ~1 year.
+    """
+    ck = cache._make_key("venue_coord", f"venue_{int(venue_id)}")
+    hit = cache.load_json("venue_coord", ck, max_age_days=365)
+    if isinstance(hit, dict):
+        return hit.get("lat"), hit.get("lon")
+
+    url = f"https://statsapi.mlb.com/api/v1/venues/{int(venue_id)}"
+    data = _safe_get_json(url) or {}
+    venues = data.get("venues") or []
+    if venues:
+        loc = (venues[0].get("location") or {})
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        out = {"lat": (float(lat) if lat is not None else None),
+               "lon": (float(lon) if lon is not None else None)}
+        cache.save_json("venue_coord", out, ck)
+        return out["lat"], out["lon"]
+
+    return None, None
